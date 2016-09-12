@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+lib = File.expand_path(File.dirname(__FILE__) + '/../lib')
+$LOAD_PATH.unshift(lib) if File.directory?(lib) && !$LOAD_PATH.include?(lib)
+
+require 'stethoscope'
+
+Stethoscope.main(ARGV)
+
+exit 0
+
+config = YAML.load(IO.read('config.yml'))
+
+output = UniMIDI::Output.find_by_name(config['midi']['output']).open
+
+def val_from_config(definition, key, data, default = nil)
+  value = definition[key]
+  case value
+  when nil
+    default || raise("No value, and no default specified")
+  when String
+    data[value.to_sym]
+  when Hash
+    data[value.to_sym]
+  else
+    value
+  end.to_f
+end
+
+MIDI.using(output) do
+
+  begin
+
+    $stdin.each do |line|
+      event_data = STATSD_REGEX.match(line)
+
+      puts line
+
+      if event_definition = config['events'][event_data[:event_name]]
+        note_val = val_from_config(event_definition, 'note', event_data, 0.1)
+        note_length = val_from_config(event_definition, 'length', event_data, 0.1)
+        note_channel = val_from_config(event_definition, 'channel', event_data, 1)
+        note_velocity = val_from_config(event_definition, 'velocity', event_data, 100)
+
+        puts "note: #{note_val}, length: #{note_length}, channel: #{note_channel}, velocity: #{note_velocity}"
+
+        note note_val, channel: note_channel, velocity: note_velocity
+        sleep note_length
+        note_off note_val, channel: note_channel
+      end
+    end
+
+  rescue Interrupt
+    all_off
+    puts "Goodbye."
+  end
+
+end
